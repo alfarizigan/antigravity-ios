@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import UserNotifications
 
 struct WebViewContainer: UIViewRepresentable {
     @Binding var progress: Double
@@ -25,6 +26,37 @@ struct WebViewContainer: UIViewRepresentable {
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences = preferences
+
+        // Inject Native Notification Bridge so web app notifications trigger native iOS notification banners
+        let contentController = WKUserContentController()
+        let scriptSource = """
+        (function() {
+            function postNativeNotification(title, options) {
+                try {
+                    window.webkit.messageHandlers.notificationHandler.postMessage({
+                        title: title || 'Antigravity',
+                        body: (options && options.body) ? options.body : ''
+                    });
+                } catch(e) {}
+            }
+            window.Notification = function(title, options) {
+                postNativeNotification(title, options);
+                return {
+                    close: function() {},
+                    addEventListener: function() {},
+                    removeEventListener: function() {}
+                };
+            };
+            window.Notification.permission = 'granted';
+            window.Notification.requestPermission = function() {
+                return Promise.resolve('granted');
+            };
+        })();
+        """
+        let userScript = WKUserScript(source: scriptSource, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        contentController.addUserScript(userScript)
+        contentController.add(context.coordinator, name: "notificationHandler")
+        configuration.userContentController = contentController
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -84,7 +116,7 @@ struct WebViewContainer: UIViewRepresentable {
         }
     }
 
-    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
         var parent: WebViewContainer
         private var progressObservation: NSKeyValueObservation?
         private var urlObservation: NSKeyValueObservation?
@@ -132,6 +164,23 @@ struct WebViewContainer: UIViewRepresentable {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 sender.endRefreshing()
+            }
+        }
+
+        // Bridge JavaScript window.Notification to iOS native notification banners
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "notificationHandler", let dict = message.body as? [String: Any] {
+                let title = dict["title"] as? String ?? "Antigravity"
+                let body = dict["body"] as? String ?? ""
+
+                let content = UNMutableNotificationContent()
+                content.title = title
+                content.body = body
+                content.sound = .default
+
+                let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+                let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: trigger)
+                UNUserNotificationCenter.current().add(request)
             }
         }
 
@@ -244,7 +293,7 @@ struct WebViewContainer: UIViewRepresentable {
         }
 
         func downloadDidFinish(_ download: WKDownload) {
-            // Can be handed to share sheet if needed
+            // Download completed gracefully
         }
 
         func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
