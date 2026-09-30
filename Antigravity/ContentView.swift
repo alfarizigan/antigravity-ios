@@ -14,15 +14,13 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Loading progress bar
                 if isLoading && progress < 1.0 {
                     ProgressView(value: progress)
-                        .progressViewStyle(LinearProgressViewStyle(tint: .blue))
+                        .progressViewStyle(LinearProgressViewStyle(tint: Color(red: 0.26, green: 0.52, blue: 0.96)))
                         .frame(height: 2)
                         .transition(.opacity)
                 }
 
-                // Native WebView
                 WebViewContainer(
                     url: targetURL,
                     progress: $progress,
@@ -31,7 +29,7 @@ struct ContentView: View {
                     canGoForward: $canGoForward,
                     reloadTrigger: $reloadTrigger
                 )
-                .edgesIgnoringSafeArea(.bottom)
+                .ignoresSafeArea(.all, edges: .bottom)
             }
         }
     }
