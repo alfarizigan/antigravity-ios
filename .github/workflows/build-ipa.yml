@@ -25,24 +25,25 @@ jobs:
 
       - name: Build iOS App (.app)
         run: |
-          mkdir -p build/Release-iphoneos
+          mkdir -p build
           xcodebuild build \
             -project Antigravity.xcodeproj \
             -scheme Antigravity \
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            CONFIGURATION_BUILD_DIR="$PWD/build/Release-iphoneos"
+            COMPILER_INDEX_STORE_ENABLE=NO > build.log 2>&1 || (cat build.log && exit 1)
 
       - name: Package .ipa
         run: |
-          APP_PATH=$(find . -name "Antigravity.app" -type d | head -n 1)
+          APP_PATH=$(find build -name "Antigravity.app" -type d | head -n 1)
           if [ -z "$APP_PATH" ]; then
-            echo "Error: Antigravity.app not found!"
+            echo "Error: Antigravity.app not found in build directory!"
+            find . -name "*.app" -type d
             exit 1
           fi
           echo "Packaging $APP_PATH into IPA..."
@@ -50,7 +51,8 @@ jobs:
           cp -r "$APP_PATH" Payload/
           zip -r -q GoogleAntigravity.ipa Payload
           rm -rf Payload
-          echo "GoogleAntigravity.ipa created successfully!"
+          echo "GoogleAntigravity.ipa successfully created!"
+          ls -lh GoogleAntigravity.ipa
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
@@ -58,3 +60,10 @@ jobs:
           name: GoogleAntigravity-IPA
           path: GoogleAntigravity.ipa
           retention-days: 14
+
+      - name: Upload Build Log if Failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-failure
+          path: build.log
