@@ -238,7 +238,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		6001 /* Build configuration list for PBXNativeTarget "Antigravity" */;
+		6001 /* Build configuration list for PBXNativeTarget "Antigravity" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A001 /* Debug */,
@@ -247,7 +247,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		6002 /* Build configuration list for PBXProject "Antigravity" */;
+		6002 /* Build configuration list for PBXProject "Antigravity" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A003 /* Debug */,
