@@ -2,12 +2,14 @@ import SwiftUI
 import WebKit
 
 struct WebViewContainer: UIViewRepresentable {
-    let url: URL
     @Binding var progress: Double
     @Binding var isLoading: Bool
     @Binding var canGoBack: Bool
     @Binding var canGoForward: Bool
     @Binding var reloadTrigger: Bool
+    @Binding var goBackTrigger: Bool
+    @Binding var goHomeTrigger: Bool
+    @Binding var externalURLToOpen: IdentifiableURL?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -17,9 +19,9 @@ struct WebViewContainer: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = WKWebsiteDataStore.default()
 
-        // Enable JavaScript and responsive web preferences
+        // Responsive viewport and script execution
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences = preferences
@@ -32,20 +34,27 @@ struct WebViewContainer: UIViewRepresentable {
         webView.backgroundColor = UIColor(red: 0.07, green: 0.08, blue: 0.10, alpha: 1.0)
         webView.scrollView.backgroundColor = UIColor(red: 0.07, green: 0.08, blue: 0.10, alpha: 1.0)
 
-        // Custom Safari User-Agent to prevent Google OAuth 'disallowed_useragent' 403 error
+        // Custom Safari User-Agent to avoid Google OAuth 403 disallowed_useragent
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
 
         // Pull to refresh support
         let refreshControl = UIRefreshControl()
         refreshControl.addTarget(context.coordinator, action: #selector(Coordinator.handleRefresh(_:)), for: .valueChanged)
-        refreshControl.tintColor = .systemBlue
+        refreshControl.tintColor = UIColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0)
         webView.scrollView.refreshControl = refreshControl
 
         // Observe progress
         context.coordinator.setupProgressObserver(for: webView)
 
-        let request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30)
-        webView.load(request)
+        // Observe cookies for persistence
+        CookieManager.shared.setupObserver(for: webView.configuration.websiteDataStore.httpCookieStore)
+
+        // Restore cookies before loading initial URL
+        CookieManager.shared.restoreCookies(into: webView.configuration.websiteDataStore.httpCookieStore) {
+            let startURL = CookieManager.shared.getInitialURL()
+            let request = URLRequest(url: startURL, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30)
+            webView.load(request)
+        }
 
         return webView
     }
@@ -56,6 +65,22 @@ struct WebViewContainer: UIViewRepresentable {
                 self.reloadTrigger = false
             }
             uiView.reload()
+        }
+        if goBackTrigger {
+            DispatchQueue.main.async {
+                self.goBackTrigger = false
+            }
+            if uiView.canGoBack {
+                uiView.goBack()
+            }
+        }
+        if goHomeTrigger {
+            DispatchQueue.main.async {
+                self.goHomeTrigger = false
+            }
+            CookieManager.shared.clearSavedURL()
+            let rootReq = URLRequest(url: URL(string: "https://antigravity.google")!)
+            uiView.load(rootReq)
         }
     }
 
@@ -84,8 +109,42 @@ struct WebViewContainer: UIViewRepresentable {
             }
         }
 
-        // Handle target="_blank" links and Google OAuth popup redirects
+        // Intercept navigation: Open external links in SFSafariViewController
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if let url = navigationAction.request.url {
+                let host = url.host?.lowercased() ?? ""
+                let isInternal = host.isEmpty ||
+                                 host.contains("antigravity.google") ||
+                                 host.contains("accounts.google.com") ||
+                                 host.contains("google.com") ||
+                                 host.contains("gstatic.com") ||
+                                 host.contains("googleapis.com")
+
+                if navigationAction.navigationType == .linkActivated && !isInternal {
+                    decisionHandler(.cancel)
+                    DispatchQueue.main.async {
+                        self.parent.externalURLToOpen = IdentifiableURL(url: url)
+                    }
+                    return
+                }
+            }
+            decisionHandler(.allow)
+        }
+
+        // Support target="_blank" and popups
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if let url = navigationAction.request.url {
+                let host = url.host?.lowercased() ?? ""
+                let isInternal = host.contains("antigravity.google") ||
+                                 host.contains("accounts.google.com") ||
+                                 host.contains("google.com")
+                if !isInternal {
+                    DispatchQueue.main.async {
+                        self.parent.externalURLToOpen = IdentifiableURL(url: url)
+                    }
+                    return nil
+                }
+            }
             if navigationAction.targetFrame == nil {
                 webView.load(navigationAction.request)
             }
@@ -105,6 +164,9 @@ struct WebViewContainer: UIViewRepresentable {
                 self.parent.isLoading = false
                 self.parent.canGoBack = webView.canGoBack
                 self.parent.canGoForward = webView.canGoForward
+                if let currentURL = webView.url {
+                    CookieManager.shared.saveLastVisitedURL(currentURL)
+                }
             }
         }
 
