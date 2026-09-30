@@ -1,22 +1,37 @@
 import Foundation
 import WebKit
+import UIKit
 
 class CookieManager: NSObject, WKHTTPCookieStoreObserver {
     static let shared = CookieManager()
-    private let cookiesKey = "SavedAntigravityCookies_v1"
-    private let lastURLKey = "SavedLastVisitedURL_v1"
+    private let cookiesKey = "SavedAntigravityCookies_v2"
+    private let lastURLKey = "SavedLastVisitedURL_v2"
     private let defaultRootURL = "https://antigravity.google"
+    private weak var currentCookieStore: WKHTTPCookieStore?
 
     private override init() {
         super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
     }
 
     func setupObserver(for cookieStore: WKHTTPCookieStore) {
+        self.currentCookieStore = cookieStore
         cookieStore.add(self)
     }
 
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
         saveCookies(from: cookieStore)
+    }
+
+    @objc private func handleAppBackground() {
+        if let store = currentCookieStore {
+            saveCookies(from: store)
+        }
     }
 
     func saveCookies(from cookieStore: WKHTTPCookieStore) {
@@ -31,7 +46,7 @@ class CookieManager: NSObject, WKHTTPCookieStoreObserver {
                 if cookie.isSecure {
                     props[HTTPCookiePropertyKey.secure.rawValue] = "TRUE"
                 }
-                // Convert session cookies to persistent cookies (1 year expiration)
+                // Convert session cookies to persistent cookies with 1 year expiration
                 if let expiresDate = cookie.expiresDate {
                     props[HTTPCookiePropertyKey.expires.rawValue] = expiresDate
                 } else {
@@ -40,6 +55,7 @@ class CookieManager: NSObject, WKHTTPCookieStoreObserver {
                 cookiesData.append(props)
             }
             UserDefaults.standard.set(cookiesData, forKey: self.cookiesKey)
+            UserDefaults.standard.synchronize()
         }
     }
 
@@ -70,9 +86,10 @@ class CookieManager: NSObject, WKHTTPCookieStoreObserver {
 
     func saveLastVisitedURL(_ url: URL) {
         guard let host = url.host?.lowercased() else { return }
-        // Only save antigravity application URLs, skip external domains or accounts login pages
+        // Save antigravity application URLs, skip external domains or oauth login pages
         if host.contains("antigravity.google") && !host.contains("accounts.google") {
             UserDefaults.standard.set(url.absoluteString, forKey: lastURLKey)
+            UserDefaults.standard.synchronize()
         }
     }
 
@@ -88,5 +105,6 @@ class CookieManager: NSObject, WKHTTPCookieStoreObserver {
 
     func clearSavedURL() {
         UserDefaults.standard.removeObject(forKey: lastURLKey)
+        UserDefaults.standard.synchronize()
     }
 }
