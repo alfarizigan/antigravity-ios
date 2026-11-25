@@ -17,9 +17,11 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>2.0.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIconFiles</key>
 	<array>
 		<string>AppIcon60x60</string>
@@ -53,7 +55,26 @@
 			<string>AppIcon</string>
 		</dict>
 	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.google.antigravity.ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>antigravity</string>
+			</array>
+		</dict>
+	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
@@ -63,7 +84,7 @@
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
-		<string></string>
+		<string>LaunchBackground</string>
 		<key>UIImageRespectsSafeAreaInsets</key>
 		<true/>
 	</dict>
@@ -94,12 +115,12 @@
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleLightContent</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Aplikasi memerlukan izin kamera untuk mengambil foto dan mengunggah gambar.</string>
+	<string>Aplikasi memerlukan izin kamera untuk mengambil foto, memindai kode, atau mengunggah gambar ke obrolan agen.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Aplikasi memerlukan izin mikrofon untuk interaksi suara.</string>
+	<string>Aplikasi memerlukan izin mikrofon untuk fitur Antigravity Voice Mode dan input suara.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Aplikasi memerlukan akses galeri foto untuk melampirkan gambar.</string>
+	<string>Aplikasi memerlukan akses galeri foto untuk melampirkan gambar atau tangkapan layar ke agen.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Aplikasi memerlukan akses untuk menyimpan gambar.</string>
+	<string>Aplikasi memerlukan akses untuk menyimpan gambar atau media hasil kerja agen ke galeri foto.</string>
 </dict>
 </plist>

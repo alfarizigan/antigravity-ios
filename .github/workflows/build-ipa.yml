@@ -3,6 +3,9 @@ name: Build Antigravity iOS IPA
 on:
   push:
     branches: [ "main", "master" ]
+    paths-ignore:
+      - "GoogleAntigravity.ipa"
+      - "README.md"
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
@@ -21,6 +24,7 @@ jobs:
 
       - name: Show Xcode Schemes and Targets
         run: |
+          xcodebuild -version
           xcodebuild -list -project Antigravity.xcodeproj
 
       - name: Build iOS App (.app)
@@ -47,21 +51,28 @@ jobs:
             exit 1
           fi
           echo "Packaging $APP_PATH into IPA..."
-          
-          # Copy app icons and artworks into the .app bundle
+
+          # Copy fallback icons & artworks for ESign / Scarlet / Feather / AltStore compatibility
           cp -f icons/AppIcon*.png "$APP_PATH/"
           cp -f icons/iTunesArtwork* "$APP_PATH/"
-          
+
+          # Strip any residual _CodeSignature directories and enforce Unix 0755 executable permissions
+          find "$APP_PATH" -name "_CodeSignature" -type d -exec rm -rf {} + || true
+          chmod 755 "$APP_PATH/Antigravity"
+
+          echo "Bundle contents:"
+          ls -lh "$APP_PATH"
+
           mkdir -p Payload
-          cp -r "$APP_PATH" Payload/
-          
-          # Copy iTunesArtwork to root for Scarlet / AltStore preview
+          cp -R "$APP_PATH" Payload/
+
+          # Copy iTunesArtwork to IPA root for sideloader preview
           cp -f icons/iTunesArtwork .
           cp -f icons/iTunesArtwork@2x .
-          
-          zip -r -q GoogleAntigravity.ipa Payload iTunesArtwork iTunesArtwork@2x
+
+          zip -r -9 -q GoogleAntigravity.ipa Payload iTunesArtwork iTunesArtwork@2x
           rm -rf Payload iTunesArtwork iTunesArtwork@2x
-          echo "GoogleAntigravity.ipa successfully created with app icons!"
+          echo "GoogleAntigravity.ipa v2.0.0 successfully packaged!"
           ls -lh GoogleAntigravity.ipa
 
       - name: Upload IPA Artifact
@@ -69,7 +80,7 @@ jobs:
         with:
           name: GoogleAntigravity-IPA
           path: GoogleAntigravity.ipa
-          retention-days: 14
+          retention-days: 30
 
       - name: Upload Build Log if Failed
         if: failure()
