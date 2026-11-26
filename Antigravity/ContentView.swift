@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var isInitialBootLoading: Bool = true
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
+    @State private var isQuickBarExpanded: Bool = false
     @State private var currentURL: URL? = nil
     @State private var networkErrorMessage: String? = nil
 
@@ -24,26 +25,36 @@ struct ContentView: View {
     private let barColor = Color(red: 24/255, green: 24/255, blue: 27/255)
     private let accentBlue = Color(red: 0.35, green: 0.62, blue: 1.0)
 
+    private var showTopBar: Bool {
+        canGoBack || isQuickBarExpanded
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             surfaceColor
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Slim Adaptive Navigation Bar (slides in smoothly only when history exists)
-                if canGoBack {
+                // Slim Adaptive Navigation Bar (auto-appears on subpages, or toggleable anytime via subtle top handle)
+                if showTopBar {
                     HStack(spacing: 16) {
-                        Button(action: {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            goBackTrigger = true
-                        }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 15, weight: .bold))
-                                Text("Kembali")
-                                    .font(.system(size: 14, weight: .semibold))
+                        if canGoBack {
+                            Button(action: {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                goBackTrigger = true
+                            }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 15, weight: .bold))
+                                    Text("Kembali")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                .foregroundColor(accentBlue)
                             }
-                            .foregroundColor(accentBlue)
+                        } else {
+                            Text("Antigravity")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.75))
                         }
 
                         if canGoForward {
@@ -87,12 +98,25 @@ struct ContentView: View {
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white.opacity(0.85))
                         }
+
+                        if !canGoBack {
+                            Button(action: {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isQuickBarExpanded = false
+                                }
+                            }) {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.65))
+                            }
+                        }
                     }
                     .padding(.horizontal, 16)
                     .frame(height: 38)
                     .background(barColor)
                     .transition(.move(edge: .top).combined(with: .opacity))
-                    .animation(.easeInOut(duration: 0.22), value: canGoBack)
+                    .animation(.easeInOut(duration: 0.22), value: showTopBar)
                 }
 
                 // Smooth Progress Bar
@@ -123,6 +147,24 @@ struct ContentView: View {
                 )
                 .ignoresSafeArea(.keyboard)
                 .ignoresSafeArea(.container, edges: .bottom)
+            }
+
+            // Ultra-subtle top-center capsule handle when bar is hidden (0 layout height, gives 1-tap Reload/Home/Share anytime)
+            if !showTopBar && !isInitialBootLoading && networkErrorMessage == nil {
+                Button(action: {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isQuickBarExpanded = true
+                    }
+                }) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: 34, height: 4)
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 14)
+                        .contentShape(Rectangle())
+                }
+                .padding(.top, 1)
             }
 
             // Offline / Connection Error Card
@@ -197,7 +239,7 @@ struct ContentView: View {
                     .background(Color.black.opacity(0.85))
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
-                    .padding(.top, canGoBack ? 46 : 10)
+                    .padding(.top, showTopBar ? 46 : 10)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .onAppear {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {

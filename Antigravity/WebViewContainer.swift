@@ -51,13 +51,32 @@ struct WebViewContainer: UIViewRepresentable {
         pagePrefs.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences = pagePrefs
 
-        // CSP & Trusted-Types safe UserScript:
+        // CSP & Trusted-Types safe UserScript (zero innerHTML / eval):
         // 1) Bridges window.Notification & ServiceWorkerRegistration.showNotification -> UNUserNotificationCenter
-        // 2) Bridges client-side blob:/data: <a download> exports -> native Documents/Downloads + Share Sheet
+        // 2) Bridges async navigator.clipboard.writeText fallback -> UIPasteboard
+        // 3) Bridges client-side blob:/data: <a download> exports -> Documents/Downloads + Share Sheet
+        // 4) Locks viewport maximum-scale=1.0 so <16px inputs never trigger annoying iOS horizontal auto-zoom
         let contentController = WKUserContentController()
         let bridgeScript = """
         (function() {
             'use strict';
+            function lockViewportAutoZoom() {
+                try {
+                    var meta = document.querySelector('meta[name="viewport"]');
+                    if (meta) {
+                        var content = meta.getAttribute('content') || '';
+                        if (content.indexOf('maximum-scale') === -1) {
+                            meta.setAttribute('content', content + ', maximum-scale=1.0');
+                        }
+                    }
+                } catch (_) {}
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', lockViewportAutoZoom, { once: true });
+            } else {
+                lockViewportAutoZoom();
+            }
+
             function sendNativeNotification(title, options) {
                 try {
                     var opts = options || {};
@@ -110,6 +129,19 @@ struct WebViewContainer: UIViewRepresentable {
                 };
             }
 
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                var origWriteText = navigator.clipboard.writeText.bind(navigator.clipboard);
+                navigator.clipboard.writeText = function(text) {
+                    var str = String(text == null ? '' : text);
+                    return origWriteText(str).catch(function() {
+                        try {
+                            window.webkit.messageHandlers.clipboardHandler.postMessage(str);
+                        } catch (_) {}
+                        return Promise.resolve();
+                    });
+                };
+            }
+
             document.addEventListener('click', function(ev) {
                 var el = ev.target;
                 while (el && el.tagName !== 'A') {
@@ -150,6 +182,7 @@ struct WebViewContainer: UIViewRepresentable {
         let weakHandler = WeakScriptMessageHandler(context.coordinator)
         contentController.add(weakHandler, name: "notificationHandler")
         contentController.add(weakHandler, name: "blobDownloadHandler")
+        contentController.add(weakHandler, name: "clipboardHandler")
         configuration.userContentController = contentController
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -278,7 +311,6 @@ struct WebViewContainer: UIViewRepresentable {
                 }
             }
 
-            // Safety cap so initial splash never hangs if a long-polling subresource keeps loading
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.5) { [weak self] in
                 if self?.parent.isInitialBootLoading == true {
                     withAnimation(.easeOut(duration: 0.25)) {
@@ -305,7 +337,6 @@ struct WebViewContainer: UIViewRepresentable {
 
         @objc private func handleWillEnterForeground() {
             guard let wv = webView else { return }
-            // Recover automatically if WebContent was terminated while suspended in background
             if wv.url == nil {
                 recoverWebViewSession(wv)
             }
@@ -407,6 +438,8 @@ struct WebViewContainer: UIViewRepresentable {
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
                 let request = UNNotificationRequest(identifier: reqID, content: content, trigger: trigger)
                 UNUserNotificationCenter.current().add(request)
+            } else if message.name == "clipboardHandler", let text = message.body as? String {
+                UIPasteboard.general.string = text
             } else if message.name == "blobDownloadHandler", let dict = message.body as? [String: Any] {
                 guard let dataURL = dict["dataURL"] as? String,
                       let commaIdx = dataURL.firstIndex(of: ",") else { return }
@@ -456,7 +489,6 @@ struct WebViewContainer: UIViewRepresentable {
                 return
             }
 
-            // Inside popup OAuth webView, allow OAuth redirects (GitHub / Google) freely
             if webView !== self.webView {
                 decisionHandler(.allow)
                 return
@@ -481,15 +513,18 @@ struct WebViewContainer: UIViewRepresentable {
             decidePolicyFor navigationResponse: WKNavigationResponse,
             decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
         ) {
-            if let httpResp = navigationResponse.response as? HTTPURLResponse,
-               let disposition = httpResp.value(forHTTPHeaderField: "Content-Disposition")?.lowercased(),
-               disposition.contains("attachment") {
-                decisionHandler(.download)
-                return
-            }
-            if !navigationResponse.canShowMIMEType {
-                decisionHandler(.download)
-                return
+            if let httpResp = navigationResponse.response as? HTTPURLResponse {
+                if let disposition = httpResp.value(forHTTPHeaderField: "Content-Disposition")?.lowercased(),
+                   disposition.contains("attachment") {
+                    decisionHandler(.download)
+                    return
+                }
+                // Only trigger fallback MIME download on main-frame HTTP 200 responses,
+                // never on background auth iframes or 204 No Content pings
+                if navigationResponse.isForMainFrame && httpResp.statusCode == 200 && !navigationResponse.canShowMIMEType {
+                    decisionHandler(.download)
+                    return
+                }
             }
             decisionHandler(.allow)
         }
@@ -533,7 +568,6 @@ struct WebViewContainer: UIViewRepresentable {
             guard webView === self.webView else { return }
             let nsErr = error as NSError
 
-            // Ignore benign navigation cancellations (-999) and policy/download handoffs (WebKitErrorDomain 102 / 204)
             if nsErr.code == NSURLErrorCancelled || (nsErr.domain == "WebKitErrorDomain" && (nsErr.code == 102 || nsErr.code == 204)) {
                 DispatchQueue.main.async {
                     self.parent.isLoading = false
@@ -564,7 +598,6 @@ struct WebViewContainer: UIViewRepresentable {
             }
         }
 
-        // Auto-recover if iOS terminates background WebContent process under heavy memory pressure
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             guard webView === self.webView else {
                 DispatchQueue.main.async {
@@ -575,7 +608,7 @@ struct WebViewContainer: UIViewRepresentable {
             recoverWebViewSession(webView)
         }
 
-        // MARK: - WKUIDelegate (Popups, JS Alerts/Confirms/Prompts, Voice Mode Mic/Camera)
+        // MARK: - WKUIDelegate
 
         func webView(
             _ webView: WKWebView,
@@ -587,13 +620,11 @@ struct WebViewContainer: UIViewRepresentable {
             let scheme = url?.scheme?.lowercased() ?? ""
             let host = url?.host?.lowercased() ?? ""
 
-            // System schemes
             if ["mailto", "tel", "sms", "facetime"].contains(scheme), let validURL = url {
                 UIApplication.shared.open(validURL)
                 return nil
             }
 
-            // Standard external target="_blank" link click (non-OAuth, non-popup window) -> In-App Safari Sheet
             let isExplicitPopupWindow = (windowFeatures.width != nil || windowFeatures.height != nil)
             if let validURL = url,
                (scheme == "http" || scheme == "https"),
@@ -606,7 +637,6 @@ struct WebViewContainer: UIViewRepresentable {
                 return nil
             }
 
-            // OAuth popup or window.open() requiring window.opener & shared WKWebsiteDataStore
             let popupWV = WKWebView(frame: .zero, configuration: configuration)
             popupWV.navigationDelegate = self
             popupWV.uiDelegate = self
@@ -632,7 +662,6 @@ struct WebViewContainer: UIViewRepresentable {
             }
         }
 
-        // Seamless Voice Mode & Camera capture permission for trusted Google Antigravity origins
         func webView(
             _ webView: WKWebView,
             requestMediaCapturePermissionFor origin: WKSecurityOrigin,
